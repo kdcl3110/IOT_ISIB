@@ -325,29 +325,25 @@ boolean receive(char *payload) {
         {
             payload[i] = (char)readReg(REG_FIFO);
         }
+        payload[receivedCount] = '\0';
     }
     return true;
 }
 
-void receivepacket() {
+void receivepacket(const char *csv_filename) {
 
     long int SNR;
     int rssicorr;
 
-    if(digitalRead(dio0) == 1)
+    if (digitalRead(dio0) == 1)
     {
-        if(receive(message)) {
+        if (receive(message)) {
             byte value = readReg(REG_PKT_SNR_VALUE);
-            if( value & 0x80 ) // The SNR sign bit is 1
-            {
-                // Invert and divide by 4
-                value = ( ( ~value + 1 ) & 0xFF ) >> 2;
+            if (value & 0x80) {
+                value = ((~value + 1) & 0xFF) >> 2;
                 SNR = -value;
-            }
-            else
-            {
-                // Divide by 4
-                SNR = ( value & 0xFF ) >> 2;
+            } else {
+                SNR = (value & 0xFF) >> 2;
             }
             
             if (sx1272) {
@@ -356,16 +352,40 @@ void receivepacket() {
                 rssicorr = 157;
             }
 
-            printf("Packet RSSI: %d, ", readReg(0x1A)-rssicorr);
-            printf("RSSI: %d, ", readReg(0x1B)-rssicorr);
-            printf("SNR: %li, ", SNR);
-            printf("Length: %i", (int)receivedbytes);
-            printf("\n");
-            printf("Payload: %s\n", message);
+            const char *prefix = "grp1_";
+            size_t prefix_len = strlen(prefix);
 
-        } // received a message
+            if (strncmp(message, prefix, prefix_len) == 0) {
+                int valeur = 0;
+                int packet_rssi = readReg(0x1A) - rssicorr;
+                int noise_rssi  = readReg(0x1B) - rssicorr;
+                int length      = (int)receivedbytes;
 
-    } // dio0=1
+                printf("Packet RSSI: %d, RSSI: %d, SNR: %li, Length: %i\n",
+                       packet_rssi, noise_rssi, SNR, length);
+
+                if (sscanf(message + prefix_len, "%d", &valeur) == 1) {
+                    grp1_count++;
+                    printf("[STATS] Message grp1 détecté ! Chiffre : %d | Total : %lu\n", 
+                           valeur, grp1_count);
+
+                    // Écriture dans le fichier passé en paramètre
+                    FILE *csv = fopen(csv_filename, "a");
+                    if (csv != NULL) {
+                        time_t now = time(NULL);
+                        fprintf(csv, "%ld,%d,%d,%li,%d,%d,%lu\n",
+                                (long)now, packet_rssi, noise_rssi, SNR, length, valeur, grp1_count);
+                        fflush(csv);
+                        fclose(csv);
+                    } else {
+                        perror("Erreur ouverture CSV");
+                    }
+                } else {
+                    printf("[STATS] En-tête grp1_ reconnue, format numérique invalide.\n");
+                }
+            }
+        } // receive
+    } // dio0 == 1
 }
 
 static void configPower (int8_t pw) {
